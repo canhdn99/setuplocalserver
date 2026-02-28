@@ -20,17 +20,18 @@ Interactive TUI (Text User Interface) for automated Ubuntu/Debian server setup, 
 | 1 | Update/Upgrade | `apt-get update && upgrade && autoremove` |
 | 2 | Auto Updates | Install unattended-upgrades for automatic daily security patches |
 | 3 | Timezone | Set to `Asia/Bangkok` |
-| 4 | Base Packages | openssh-server, ufw, curl, wget, nano, net-tools, lm-sensors, tlp, smartmontools, git, htop, tmux, ncdu, jq, unzip, rsync, iotop |
+| 4 | Base Packages | openssh-server, ufw, curl, wget, nano, net-tools, lm-sensors, tlp, smartmontools, git, htop, tmux, ncdu, jq, unzip, rsync, iotop, **zsh**, **lazydocker** |
 | 5 | SSH Hardening | PermitRootLogin=no, PasswordAuth=yes, PubkeyAuth=yes (via drop-in conf) |
 | 6 | Fail2Ban | Install and configure local jail for SSH protection |
-| 7 | UFW Firewall | Allow SSH, deny incoming, allow outgoing |
-| 8 | Docker | Install Docker Engine (official apt), Compose, add user to docker group |
-| 9 | Disable Sleep | Mask sleep/suspend/hibernate/hybrid-sleep targets |
-| 10 | Lid Close | HandleLidSwitch=ignore, HandleLidSwitchDocked=ignore (via drop-in conf) |
-| 11 | TLP + Sensors | Enable TLP power management, auto-detect sensors |
-| 12 | Wait-Online | Disable systemd-networkd-wait-online for faster boot |
-| 13 | Tailscale VPN | Install Tailscale via official script, enable tailscaled |
-| 14 | USB Ethernet | Auto-detect, rename, DHCP with route metrics, disable cloud-init network |
+| 7 | UFW Firewall | Allow SSH (rate-limited), deny incoming, allow outgoing |
+| 8 | Passwordless Sudo | Allow `$SUDO_USER` to use `sudo` without entering a password |
+| 9 | Docker | Install Docker Engine (official apt), Compose, add user to docker group |
+| 10 | Disable Sleep | Mask sleep/suspend/hibernate/hybrid-sleep targets |
+| 11 | Lid Close | HandleLidSwitch=ignore, HandleLidSwitchDocked=ignore (via drop-in conf) |
+| 12 | TLP + Sensors | Enable TLP power management, auto-detect sensors |
+| 13 | Wait-Online | Disable systemd-networkd-wait-online for faster boot |
+| 14 | Tailscale VPN | Install Tailscale via official script, add user to tailscale group |
+| 15 | USB Ethernet | Auto-detect, rename, DHCP with route metrics, disable cloud-init network |
 
 ## Quick Start
 
@@ -94,11 +95,14 @@ Installs and enables `unattended-upgrades` non-interactively to ensure the serve
 
 ## Tailscale VPN
 
-Installs [Tailscale](https://tailscale.com/) via the official install script. After apply:
+Installs [Tailscale](https://tailscale.com/) via the official install script. Extras:
+- Adds the invoking user (`$SUDO_USER`) to the `tailscale` group (no `sudo` needed to run `tailscale` commands).
+
+After apply:
 
 ```bash
 # Authenticate and connect to your tailnet
-sudo tailscale up
+tailscale up
 
 # Check status
 tailscale status

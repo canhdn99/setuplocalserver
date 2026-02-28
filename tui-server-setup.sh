@@ -156,6 +156,7 @@ SEL_TAILSCALE=0
 SEL_DOCKER=0
 SEL_FAIL2BAN=0
 SEL_AUTO_UPDATE=0
+SEL_SUDO_NOPASSWD=0
 
 USB_ENABLE=0
 USB_IFACE=""
@@ -224,8 +225,40 @@ act_packages() {
     openssh-server ufw curl wget nano \
     net-tools iproute2 netcat-openbsd \
     lm-sensors tlp git htop tmux ncdu \
-    jq unzip rsync iotop
+    jq unzip rsync iotop zsh
+
   run apt-get install -y smartmontools || true
+
+  # 1. Oh My Zsh (basic install, non-interactive)
+  if [[ ! -d /root/.oh-my-zsh ]]; then
+    log "Installing Oh My Zsh for root..."
+    {
+      wget -O/tmp/install_omz.sh https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh
+      sh /tmp/install_omz.sh --unattended
+      rm -f /tmp/install_omz.sh
+    } >>"$LOG_FILE" 2>&1 || true
+    run chsh -s "$(which zsh)" root
+  fi
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    local user_home
+    user_home="$(eval echo "~$SUDO_USER")"
+    if [[ ! -d "$user_home/.oh-my-zsh" ]]; then
+      log "Installing Oh My Zsh for $SUDO_USER..."
+      {
+        su - "$SUDO_USER" -c 'wget -O/tmp/install_omz_user.sh https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh'
+        su - "$SUDO_USER" -c 'sh /tmp/install_omz_user.sh --unattended'
+        rm -f /tmp/install_omz_user.sh
+      } >>"$LOG_FILE" 2>&1 || true
+      run chsh -s "$(which zsh)" "$SUDO_USER"
+    fi
+  fi
+
+  # 2. Lazydocker (install via script)
+  if ! command -v lazydocker >/dev/null 2>&1; then
+    log "Installing lazydocker..."
+    curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash >>"$LOG_FILE" 2>&1
+    [[ -f "$HOME/.local/bin/lazydocker" ]] && run install -m 0755 "$HOME/.local/bin/lazydocker" /usr/local/bin/lazydocker || true
+  fi
 }
 
 act_ssh() {
@@ -250,8 +283,8 @@ PubkeyAuthentication yes
 }
 
 act_ufw() {
-  run ufw allow OpenSSH || true
-  run ufw allow 22/tcp || true
+  run ufw limit OpenSSH || true
+  run ufw limit 22/tcp || true
   run ufw default deny incoming
   run ufw default allow outgoing
   run ufw --force enable
@@ -308,7 +341,14 @@ act_tailscale() {
     log "Tailscale already installed"
   fi
   run systemctl enable --now tailscaled
-  log "Tailscale installed. Run 'sudo tailscale up' to authenticate."
+  
+  # Add SUDO_USER to tailscale group so they don't need sudo for tailscale commands
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    run usermod -aG tailscale "$SUDO_USER" || true
+    log "Added user $SUDO_USER to tailscale group"
+  fi
+
+  log "Tailscale installed. Run 'tailscale up' to authenticate."
 }
 
 act_docker() {
@@ -348,6 +388,22 @@ bantime = 1h
 "
   run systemctl enable --now fail2ban
   run systemctl restart fail2ban
+}
+
+act_sudo_nopasswd() {
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    local dropin_dir="/etc/sudoers.d"
+    local dropin_file="${dropin_dir}/99-tui-nopasswd-${SUDO_USER}"
+    
+    write_file "$dropin_file" \
+"${SUDO_USER} ALL=(ALL) NOPASSWD: ALL
+"
+    # Ensure correct permissions for sudoers drop-in
+    run chmod 440 "$dropin_file"
+    log "Enabled passwordless sudo for user $SUDO_USER"
+  else
+    log "No SUDO_USER detected, skipping passwordless sudo"
+  fi
 }
 
 # ---------------- USB Ethernet helpers ----------------
@@ -502,6 +558,7 @@ plan_text() {
     [[ $SEL_DOCKER -eq 1 ]] && echo "  [+] Install Docker Engine (official)"
     [[ $SEL_FAIL2BAN -eq 1 ]] && echo "  [+] Install & Configure Fail2Ban (SSH)"
     [[ $SEL_AUTO_UPDATE -eq 1 ]] && echo "  [+] Enable Unattended security updates"
+    [[ $SEL_SUDO_NOPASSWD -eq 1 ]] && echo "  [+] Enable passwordless sudo for $SUDO_USER"
 
     if [[ $USB_ENABLE -eq 1 ]]; then
       echo "  [+] USB Ethernet setup"
@@ -527,7 +584,7 @@ plan_text() {
 
 # ---------------- Mixed gauge progress ----------------
 # Task list definition: tag, label, selection variable, action function
-TASK_TAGS=(UPDATE AUTO_UPDATE TZ PKGS SSH UFW SLEEP LID TLP WAIT TAILSCALE DOCKER FAIL2BAN USB)
+TASK_TAGS=(UPDATE AUTO_UPDATE TZ PKGS SSH UFW NOPASSWD SLEEP LID TLP WAIT TAILSCALE DOCKER FAIL2BAN USB)
 TASK_LABELS=(
   "Update/Upgrade packages"
   "Enable auto security updates"
@@ -535,16 +592,17 @@ TASK_LABELS=(
   "Install base packages"
   "Configure SSH (harden)"
   "Configure UFW firewall"
+  "Enable passwordless sudo"
   "Disable sleep/suspend/hibernate"
   "Ignore lid close"
   "Enable TLP + sensors"
   "Disable networkd wait-online"
   "Install Tailscale VPN"
   "Install Docker Engine"
-  "Install Fail2Ban (SSH)"
+  "Install Fail2Ban (SSH protect)"
   "USB Ethernet setup"
 )
-TASK_FUNCTIONS=(act_update act_auto_update act_timezone act_packages act_ssh act_ufw act_disable_sleep act_ignore_lid act_tlp_sensors act_disable_wait_online act_tailscale act_docker act_fail2ban act_usbeth)
+TASK_FUNCTIONS=(act_update act_auto_update act_timezone act_packages act_ssh act_ufw act_sudo_nopasswd act_disable_sleep act_ignore_lid act_tlp_sensors act_disable_wait_online act_tailscale act_docker act_fail2ban act_usbeth)
 
 # Status codes for dialog --mixedgauge:
 #   0=Succeeded  1=Failed  5=Done  6=Skipped  7=In Progress  8=Pending  9=N/A
@@ -559,6 +617,7 @@ is_task_selected() {
     PKGS) [[ $SEL_PKGS -eq 1 ]] ;;
     SSH) [[ $SEL_SSH -eq 1 ]] ;;
     UFW) [[ $SEL_UFW -eq 1 ]] ;;
+    NOPASSWD) [[ $SEL_SUDO_NOPASSWD -eq 1 ]] ;;
     SLEEP) [[ $SEL_SLEEP -eq 1 ]] ;;
     LID) [[ $SEL_LID -eq 1 ]] ;;
     TLP) [[ $SEL_TLP -eq 1 ]] ;;
@@ -685,6 +744,8 @@ build_summary() {
       echo "    +-- openssh-server, ufw, curl, wget, nano,"
       echo "        net-tools, lm-sensors, tlp, smartmontools,"
       echo "        git, htop, tmux, ncdu, jq, unzip, rsync, iotop"
+      echo "    +-- ZSH:        $(command -v zsh 2>/dev/null || echo '-')"
+      echo "    +-- lazydocker: $(command -v lazydocker 2>/dev/null || echo '-')"
       echo
     fi
 
@@ -703,7 +764,13 @@ build_summary() {
       echo "    |-- $(ufw status 2>/dev/null | head -1 || echo '-')"
       echo "    |-- Default in:  deny"
       echo "    |-- Default out: allow"
-      echo "    +-- Allowed:     OpenSSH, 22/tcp"
+      echo "    +-- Allowed:     OpenSSH (Rate Limited)"
+      echo
+    fi
+
+    if [[ $SEL_SUDO_NOPASSWD -eq 1 ]]; then
+      echo "$(si NOPASSWD) Passwordless Sudo"
+      echo "    +-- configured for: ${SUDO_USER:-none}"
       echo
     fi
 
@@ -807,7 +874,7 @@ configure_menu() {
   local out
   out="$(
     dialog --backtitle "$BACKTITLE" --title " Configure Tasks " --checklist \
-      "\nUse SPACE to toggle, ENTER to confirm:\n" 24 78 14 \
+      "\nUse SPACE to toggle, ENTER to confirm:\n" 24 78 15 \
       UPDATE "Update/Upgrade packages" $([[ $SEL_UPDATE -eq 1 ]] && echo on || echo off) \
       AUTO_UPDATE "Enable auto security updates" $([[ $SEL_AUTO_UPDATE -eq 1 ]] && echo on || echo off) \
       TZ "Set timezone Asia/Bangkok" $([[ $SEL_TZ -eq 1 ]] && echo on || echo off) \
@@ -815,6 +882,7 @@ configure_menu() {
       SSH "Configure SSH (harden)" $([[ $SEL_SSH -eq 1 ]] && echo on || echo off) \
       FAIL2BAN "Install Fail2Ban (SSH protect)" $([[ $SEL_FAIL2BAN -eq 1 ]] && echo on || echo off) \
       UFW "Configure UFW firewall" $([[ $SEL_UFW -eq 1 ]] && echo on || echo off) \
+      NOPASSWD "Enable passwordless sudo" $([[ $SEL_SUDO_NOPASSWD -eq 1 ]] && echo on || echo off) \
       DOCKER "Install Docker Engine + Compose" $([[ $SEL_DOCKER -eq 1 ]] && echo on || echo off) \
       SLEEP "Disable sleep/suspend/hibernate" $([[ $SEL_SLEEP -eq 1 ]] && echo on || echo off) \
       LID "Ignore lid close" $([[ $SEL_LID -eq 1 ]] && echo on || echo off) \
@@ -824,7 +892,7 @@ configure_menu() {
       3>&1 1>&2 2>&3
   )" || return 0
 
-  SEL_UPDATE=0; SEL_AUTO_UPDATE=0; SEL_TZ=0; SEL_PKGS=0; SEL_SSH=0; SEL_UFW=0; SEL_SLEEP=0; SEL_LID=0; SEL_TLP=0; SEL_DISABLE_WAIT_ONLINE=0; SEL_TAILSCALE=0; SEL_DOCKER=0; SEL_FAIL2BAN=0
+  SEL_UPDATE=0; SEL_AUTO_UPDATE=0; SEL_TZ=0; SEL_PKGS=0; SEL_SSH=0; SEL_UFW=0; SEL_SLEEP=0; SEL_LID=0; SEL_TLP=0; SEL_DISABLE_WAIT_ONLINE=0; SEL_TAILSCALE=0; SEL_DOCKER=0; SEL_FAIL2BAN=0; SEL_SUDO_NOPASSWD=0
 
   for c in $out; do
     c="${c//\"/}"
@@ -835,6 +903,7 @@ configure_menu() {
       PKGS) SEL_PKGS=1 ;;
       SSH) SEL_SSH=1 ;;
       UFW) SEL_UFW=1 ;;
+      NOPASSWD) SEL_SUDO_NOPASSWD=1 ;;
       SLEEP) SEL_SLEEP=1 ;;
       LID) SEL_LID=1 ;;
       TLP) SEL_TLP=1 ;;
