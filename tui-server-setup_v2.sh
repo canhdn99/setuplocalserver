@@ -16,8 +16,9 @@ LOG_FILE="$LOG_DIR/tui-setup-$(date +%F-%H%M%S).log"
 mkdir -p "$LOG_DIR"
 touch "$LOG_FILE"
 chmod 600 "$LOG_FILE"
-# Only redirect stdout through tee — keep stderr on terminal for dialog
-exec > >(tee -a "$LOG_FILE")
+
+# Log helper: writes ONLY to log file, never to terminal
+log() { printf "[%s] %s\n" "$(date +%H:%M:%S)" "$*" >>"$LOG_FILE"; }
 
 # ---------------- Root check ----------------
 if [[ "${EUID}" -ne 0 ]]; then
@@ -143,10 +144,10 @@ backup_if_exists() {
     local ts
     ts="$(date +%Y%m%d_%H%M%S)"
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      echo "[DRY-RUN] Would backup: $f → ${f}.bak_${ts}"
+      log "[DRY-RUN] Would backup: $f -> ${f}.bak_${ts}"
     else
       cp -a "$f" "${f}.bak_${ts}"
-      echo "[INFO] Backup: ${f}.bak_${ts}"
+      log "Backup: ${f}.bak_${ts}"
     fi
   fi
 }
@@ -155,23 +156,21 @@ write_file() {
   local path="$1"
   local content="$2"
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "[DRY-RUN] Would write: $path"
-    echo "[DRY-RUN] Content preview (first 3 lines):"
-    echo "$content" | head -3 | sed 's/^/  > /'
+    log "[DRY-RUN] Would write: $path"
   else
     backup_if_exists "$path"
     printf "%s\n" "$content" > "$path"
-    echo "[INFO] Wrote: $path"
+    log "Wrote: $path"
   fi
 }
 
 run() {
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "[DRY-RUN] Would run: $*"
+    log "[DRY-RUN] Would run: $*"
   else
-    echo "[INFO] Running: $*"
-    "$@" 2>&1
-    echo "[OK] Done: $*"
+    log "Running: $*"
+    "$@" >>"$LOG_FILE" 2>&1
+    log "Done: $*"
   fi
 }
 
@@ -186,7 +185,7 @@ act_timezone() {
   if timedatectl list-timezones | grep -qx "Asia/Bangkok"; then
     run timedatectl set-timezone "Asia/Bangkok"
   fi
-  timedatectl || true
+  timedatectl >>"$LOG_FILE" 2>&1 || true
 }
 
 act_packages() {
@@ -232,7 +231,7 @@ act_ufw() {
   run ufw default deny incoming
   run ufw default allow outgoing
   run ufw --force enable
-  ufw status verbose || true
+  ufw status verbose >>"$LOG_FILE" 2>&1 || true
 }
 
 act_disable_sleep() {
@@ -266,7 +265,7 @@ act_tlp_sensors() {
   run systemctl enable tlp
   run systemctl start tlp
   run sensors-detect --auto || true
-  sensors || true
+  sensors >>"$LOG_FILE" 2>&1 || true
 }
 
 act_disable_wait_online() {
@@ -325,7 +324,7 @@ get_mac_of_iface() {
 
 act_usbeth() {
   if [[ "$USB_ENABLE" -ne 1 ]]; then
-    echo "[INFO] USB Ethernet not enabled, skip"
+    log "USB Ethernet not enabled, skip"
     return 0
   fi
 
@@ -334,19 +333,17 @@ act_usbeth() {
   fi
 
   if [[ -z "$USB_IFACE" ]]; then
-    echo "[ERROR] Cannot find USB NIC. Run: ip -br link"
+    log "[ERROR] Cannot find USB NIC"
     return 1
   fi
 
   USB_MAC="$(get_mac_of_iface "$USB_IFACE")"
   if [[ -z "$USB_MAC" || "$USB_MAC" == "00:00:00:00:00:00" ]]; then
-    echo "[ERROR] Cannot read MAC from $USB_IFACE"
+    log "[ERROR] Cannot read MAC from $USB_IFACE"
     return 1
   fi
 
-  echo "[INFO] USB NIC: $USB_IFACE"
-  echo "[INFO] MAC: $USB_MAC"
-  echo "[INFO] Rename to: $USB_NAME"
+  log "USB NIC: $USB_IFACE  MAC: $USB_MAC  Rename to: $USB_NAME"
 
   local UDEV_RULE="/etc/udev/rules.d/10-usb-ethernet-name.rules"
   local NET_USB="/etc/systemd/network/10-usbeth.network"
@@ -402,7 +399,7 @@ RouteMetric=${WIFI_METRIC}
   run systemctl restart systemd-udevd
   run systemctl restart systemd-networkd
 
-  echo "[OK] USB Ethernet configured. Reboot recommended for rename to apply."
+  log "USB Ethernet configured. Reboot recommended."
 }
 
 # ---------------- Plan ----------------
