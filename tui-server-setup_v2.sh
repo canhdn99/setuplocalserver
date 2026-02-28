@@ -35,9 +35,73 @@ ensure_dialog() {
 }
 ensure_dialog
 
-# ---------------- UI defaults ----------------
-BACKTITLE="Server Setup TUI"
-export DIALOGRC=/dev/null
+# ---------------- UI Theme ----------------
+setup_theme() {
+  local rc
+  rc="$(mktemp /tmp/dialogrc.XXXXXX)"
+  cat > "$rc" <<'THEME'
+# ── Dark Cyan Theme ──
+use_shadow = ON
+use_colors = ON
+
+screen_color = (CYAN,BLUE,ON)
+
+dialog_color = (WHITE,BLACK,OFF)
+title_color = (CYAN,BLACK,ON)
+border_color = (CYAN,BLACK,ON)
+border2_color = (CYAN,BLACK,ON)
+
+button_active_color = (BLACK,CYAN,ON)
+button_inactive_color = (CYAN,BLACK,OFF)
+button_key_active_color = (BLACK,CYAN,ON)
+button_key_inactive_color = (CYAN,BLACK,ON)
+button_label_active_color = (BLACK,CYAN,ON)
+button_label_inactive_color = (CYAN,BLACK,OFF)
+
+menubox_color = (WHITE,BLACK,OFF)
+menubox_border_color = (CYAN,BLACK,ON)
+menubox_border2_color = (CYAN,BLACK,ON)
+item_color = (WHITE,BLACK,OFF)
+item_selected_color = (BLACK,CYAN,ON)
+tag_color = (CYAN,BLACK,ON)
+tag_selected_color = (BLACK,CYAN,ON)
+tag_key_color = (CYAN,BLACK,ON)
+tag_key_selected_color = (BLACK,CYAN,ON)
+
+check_color = (WHITE,BLACK,OFF)
+check_selected_color = (BLACK,CYAN,ON)
+
+inputbox_color = (WHITE,BLACK,OFF)
+inputbox_border_color = (CYAN,BLACK,ON)
+inputbox_border2_color = (CYAN,BLACK,ON)
+
+searchbox_color = (WHITE,BLACK,OFF)
+searchbox_title_color = (CYAN,BLACK,ON)
+searchbox_border_color = (CYAN,BLACK,ON)
+searchbox_border2_color = (CYAN,BLACK,ON)
+
+gauge_color = (BLACK,CYAN,ON)
+
+position_indicator_color = (CYAN,BLACK,ON)
+uarrow_color = (CYAN,BLACK,ON)
+darrow_color = (CYAN,BLACK,ON)
+THEME
+  export DIALOGRC="$rc"
+  trap 'rm -f "$rc"' EXIT
+}
+setup_theme
+
+# Dynamic backtitle with system info
+build_backtitle() {
+  local host ip_addr up_time
+  host="$(hostname 2>/dev/null || echo '?')"
+  ip_addr="$(hostname -I 2>/dev/null | awk '{print $1}' || echo '?')"
+  up_time="$(uptime -p 2>/dev/null || echo '?')"
+  local dry_tag=""
+  [[ "${DRY_RUN:-0}" -eq 1 ]] && dry_tag="  ⚠️ DRY-RUN"
+  echo "╔═ Server Setup TUI ═╗  ║ Host: ${host}  IP: ${ip_addr}  ${up_time}${dry_tag} ║"
+}
+BACKTITLE="$(build_backtitle)"
 
 # ---------------- Error trap ----------------
 on_err() {
@@ -70,29 +134,45 @@ WIFI_GLOB="wlp*"
 WIFI_METRIC="600"
 USB_DISABLE_CLOUDINIT=1
 
+DRY_RUN=0
+
 # ---------------- Helpers ----------------
 backup_if_exists() {
   local f="$1"
   if [[ -e "$f" ]]; then
     local ts
     ts="$(date +%Y%m%d_%H%M%S)"
-    cp -a "$f" "${f}.bak_${ts}"
-    echo "[INFO] Backup: ${f}.bak_${ts}"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "[DRY-RUN] Would backup: $f → ${f}.bak_${ts}"
+    else
+      cp -a "$f" "${f}.bak_${ts}"
+      echo "[INFO] Backup: ${f}.bak_${ts}"
+    fi
   fi
 }
 
 write_file() {
   local path="$1"
   local content="$2"
-  backup_if_exists "$path"
-  printf "%s\n" "$content" > "$path"
-  echo "[INFO] Wrote: $path"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "[DRY-RUN] Would write: $path"
+    echo "[DRY-RUN] Content preview (first 3 lines):"
+    echo "$content" | head -3 | sed 's/^/  > /'
+  else
+    backup_if_exists "$path"
+    printf "%s\n" "$content" > "$path"
+    echo "[INFO] Wrote: $path"
+  fi
 }
 
 run() {
-  echo "[INFO] Running: $*"
-  "$@" 2>&1
-  echo "[OK] Done: $*"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "[DRY-RUN] Would run: $*"
+  else
+    echo "[INFO] Running: $*"
+    "$@" 2>&1
+    echo "[OK] Done: $*"
+  fi
 }
 
 # ---------------- Actions ----------------
@@ -328,142 +408,286 @@ RouteMetric=${WIFI_METRIC}
 # ---------------- Plan ----------------
 plan_text() {
   {
+    echo "╔══════════════════════════════════════╗"
+    echo "║        📋  Execution Plan            ║"
+    echo "╚══════════════════════════════════════╝"
+    echo
     echo "Log: $LOG_FILE"
     echo
     echo "Selected tasks:"
-    [[ $SEL_UPDATE -eq 1 ]] && echo "- Update/Upgrade packages"
-    [[ $SEL_TZ -eq 1 ]] && echo "- Set timezone Asia/Bangkok"
-    [[ $SEL_PKGS -eq 1 ]] && echo "- Install base packages"
-    [[ $SEL_SSH -eq 1 ]] && echo "- Configure SSH"
-    [[ $SEL_UFW -eq 1 ]] && echo "- Configure UFW"
-    [[ $SEL_SLEEP -eq 1 ]] && echo "- Disable sleep/suspend/hibernate"
-    [[ $SEL_LID -eq 1 ]] && echo "- Ignore lid close"
-    [[ $SEL_TLP -eq 1 ]] && echo "- Enable TLP + sensors"
-    [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && echo "- Disable systemd-networkd-wait-online"
+    [[ $SEL_UPDATE -eq 1 ]] && echo "  📦  Update/Upgrade packages"
+    [[ $SEL_TZ -eq 1 ]] && echo "  🕐  Set timezone Asia/Bangkok"
+    [[ $SEL_PKGS -eq 1 ]] && echo "  🔧  Install base packages"
+    [[ $SEL_SSH -eq 1 ]] && echo "  🔐  Configure SSH (harden)"
+    [[ $SEL_UFW -eq 1 ]] && echo "  🛡️   Configure UFW firewall"
+    [[ $SEL_SLEEP -eq 1 ]] && echo "  😴  Disable sleep/suspend/hibernate"
+    [[ $SEL_LID -eq 1 ]] && echo "  💻  Ignore lid close"
+    [[ $SEL_TLP -eq 1 ]] && echo "  ⚡  Enable TLP + sensors"
+    [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && echo "  🚀  Disable systemd-networkd-wait-online"
 
     if [[ $USB_ENABLE -eq 1 ]]; then
-      echo "- USB Ethernet setup"
-      echo "  - iface: ${USB_IFACE:-auto}"
-      echo "  - rename: $USB_NAME"
-      echo "  - usb metric: $USB_METRIC"
-      echo "  - wifi glob: $WIFI_GLOB"
-      echo "  - wifi metric: $WIFI_METRIC"
-      echo "  - disable cloud-init network: $USB_DISABLE_CLOUDINIT"
+      echo "  🔌  USB Ethernet setup"
+      echo "       ├─ iface: ${USB_IFACE:-auto}"
+      echo "       ├─ rename: $USB_NAME"
+      echo "       ├─ usb metric: $USB_METRIC"
+      echo "       ├─ wifi glob: $WIFI_GLOB"
+      echo "       ├─ wifi metric: $WIFI_METRIC"
+      echo "       └─ disable cloud-init: $USB_DISABLE_CLOUDINIT"
     fi
 
+    local cnt
+    cnt="$(count_selected)"
     echo
-    echo "Notes:"
-    echo "- USB rename usually needs reboot."
-    echo "- Disabling wait-online can speed boot but some services may need tuning."
+    echo "─────────────────────────────────"
+    echo "Total: ${cnt} task(s) selected"
+    echo
+    echo "⚠️  Notes:"
+    echo "  • USB rename usually needs reboot."
+    echo "  • Disabling wait-online speeds boot but may affect some services."
   } | sed 's/\t/  /g'
 }
 
-# ---------------- Header + live log + gauge ----------------
-start_live_log_window() {
-  # Tail log in a dialog window, keep it visible while gauge runs
-  # Capture pid if dialog prints one, then we can kill it at end
-  TAIL_PID=""
-  local pid_tmp
-  pid_tmp="$(mktemp)"
-  dialog --backtitle "$BACKTITLE" --title "Realtime Log" --tailboxbg "$LOG_FILE" 18 90 0 0 2>"$pid_tmp" || true
-  TAIL_PID="$(grep -Eo '[0-9]+' "$pid_tmp" | head -n1 || true)"
-  rm -f "$pid_tmp" || true
+# ---------------- Mixed gauge progress ----------------
+# Task list definition: tag, label, selection variable, action function
+TASK_TAGS=(UPDATE TZ PKGS SSH UFW SLEEP LID TLP WAIT USB)
+TASK_LABELS=(
+  "📦 Update/Upgrade packages"
+  "🕐 Set timezone Asia/Bangkok"
+  "🔧 Install base packages"
+  "🔐 Configure SSH (harden)"
+  "🛡️  Configure UFW firewall"
+  "😴 Disable sleep/suspend/hibernate"
+  "💻 Ignore lid close"
+  "⚡ Enable TLP + sensors"
+  "🚀 Disable networkd wait-online"
+  "🔌 USB Ethernet setup"
+)
+TASK_FUNCTIONS=(act_update act_timezone act_packages act_ssh act_ufw act_disable_sleep act_ignore_lid act_tlp_sensors act_disable_wait_online act_usbeth)
+
+# Status codes for dialog --mixedgauge:
+#   0=Succeeded  1=Failed  5=Done  6=Skipped  7=In Progress  8=Pending  9=N/A
+declare -A TASK_STATUS
+
+is_task_selected() {
+  local tag="$1"
+  case "$tag" in
+    UPDATE) [[ $SEL_UPDATE -eq 1 ]] ;;
+    TZ) [[ $SEL_TZ -eq 1 ]] ;;
+    PKGS) [[ $SEL_PKGS -eq 1 ]] ;;
+    SSH) [[ $SEL_SSH -eq 1 ]] ;;
+    UFW) [[ $SEL_UFW -eq 1 ]] ;;
+    SLEEP) [[ $SEL_SLEEP -eq 1 ]] ;;
+    LID) [[ $SEL_LID -eq 1 ]] ;;
+    TLP) [[ $SEL_TLP -eq 1 ]] ;;
+    WAIT) [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] ;;
+    USB) [[ $USB_ENABLE -eq 1 ]] ;;
+    *) return 1 ;;
+  esac
 }
 
-stop_live_log_window() {
-  if [[ -n "${TAIL_PID:-}" ]]; then
-    kill "$TAIL_PID" 2>/dev/null || true
-  fi
-  dialog --clear || true
-}
-
-count_steps() {
+count_selected() {
   local n=0
-  [[ $SEL_UPDATE -eq 1 ]] && n=$((n+1))
-  [[ $SEL_TZ -eq 1 ]] && n=$((n+1))
-  [[ $SEL_PKGS -eq 1 ]] && n=$((n+1))
-  [[ $SEL_SSH -eq 1 ]] && n=$((n+1))
-  [[ $SEL_UFW -eq 1 ]] && n=$((n+1))
-  [[ $SEL_SLEEP -eq 1 ]] && n=$((n+1))
-  [[ $SEL_LID -eq 1 ]] && n=$((n+1))
-  [[ $SEL_TLP -eq 1 ]] && n=$((n+1))
-  [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && n=$((n+1))
-  [[ $USB_ENABLE -eq 1 ]] && n=$((n+1))
+  for tag in "${TASK_TAGS[@]}"; do
+    is_task_selected "$tag" && n=$((n+1))
+  done
   echo "$n"
 }
 
-gauge_emit() {
+show_mixed_gauge() {
   local pct="$1"
   local msg="$2"
-  echo "XXX"
-  echo "$pct"
-  echo "$msg"
-  echo "XXX"
+  local args=()
+  for i in "${!TASK_TAGS[@]}"; do
+    local tag="${TASK_TAGS[$i]}"
+    local label="${TASK_LABELS[$i]}"
+    local st="${TASK_STATUS[$tag]:-9}"
+    args+=("$label" "$st")
+  done
+  dialog --backtitle "$BACKTITLE" --title "  🚀  Applying  " \
+    --mixedgauge "$msg" 22 78 "$pct" "${args[@]}" 2>/dev/null || true
 }
 
-run_with_gauge() {
+run_all_tasks() {
   local total
-  total="$(count_steps)"
+  total="$(count_selected)"
   if [[ "$total" -le 0 ]]; then
-    gauge_emit 0 "No tasks selected"
-    sleep 1
-    gauge_emit 100 "Done"
+    dialog --backtitle "$BACKTITLE" --title "  ⚠️  No Tasks  " --msgbox "No tasks selected." 8 40
     return 0
   fi
 
-  local done=0
-  local pct=0
+  # Init all statuses
+  for tag in "${TASK_TAGS[@]}"; do
+    if is_task_selected "$tag"; then
+      TASK_STATUS[$tag]=8   # Pending
+    else
+      TASK_STATUS[$tag]=9   # N/A
+    fi
+  done
 
-  step() {
-    local label="$1"
+  local completed=0
+
+  do_task() {
+    local tag="$1"
     local fn="$2"
 
-    done=$((done+1))
-    pct=$(( (done * 100) / total ))
-    gauge_emit "$pct" "Running: $label"
-    "$fn"
-    gauge_emit "$pct" "Finished: $label"
+    if ! is_task_selected "$tag"; then
+      return 0
+    fi
+
+    local pct=$(( completed * 100 / total ))
+    TASK_STATUS[$tag]=7   # In Progress
+    show_mixed_gauge "$pct" "Running: ${TASK_LABELS[$3]}..."
+
+    if "$fn" 2>&1; then
+      TASK_STATUS[$tag]=0  # Succeeded
+    else
+      TASK_STATUS[$tag]=1  # Failed
+    fi
+
+    completed=$((completed+1))
+    pct=$(( completed * 100 / total ))
+    show_mixed_gauge "$pct" "Completed: ${TASK_LABELS[$3]}"
+    sleep 0.3
   }
 
-  [[ $SEL_UPDATE -eq 1 ]] && step "Update/Upgrade packages" act_update
-  [[ $SEL_TZ -eq 1 ]] && step "Set timezone Asia/Bangkok" act_timezone
-  [[ $SEL_PKGS -eq 1 ]] && step "Install base packages" act_packages
-  [[ $SEL_SSH -eq 1 ]] && step "Configure SSH" act_ssh
-  [[ $SEL_UFW -eq 1 ]] && step "Configure UFW" act_ufw
-  [[ $SEL_SLEEP -eq 1 ]] && step "Disable sleep/suspend/hibernate" act_disable_sleep
-  [[ $SEL_LID -eq 1 ]] && step "Ignore lid close" act_ignore_lid
-  [[ $SEL_TLP -eq 1 ]] && step "Enable TLP + sensors" act_tlp_sensors
-  [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && step "Disable networkd wait-online" act_disable_wait_online
-  [[ $USB_ENABLE -eq 1 ]] && step "USB Ethernet setup" act_usbeth
+  for i in "${!TASK_TAGS[@]}"; do
+    do_task "${TASK_TAGS[$i]}" "${TASK_FUNCTIONS[$i]}" "$i"
+  done
 
-  gauge_emit 100 "All done"
+  show_mixed_gauge 100 "All tasks finished!"
   sleep 1
+}
+
+# ---------------- Post-apply summary ----------------
+build_summary() {
+  local status_icon
+  status_icon() {
+    case "${TASK_STATUS[$1]:-9}" in
+      0) echo "✅" ;;
+      1) echo "❌" ;;
+      *) echo "➖" ;;
+    esac
+  }
+  {
+    echo "╔══════════════════════════════════════╗"
+    echo "║       📊  Setup Summary              ║"
+    echo "╚══════════════════════════════════════╝"
+    echo
+    echo "  🕐  $(date '+%F %T')"
+    echo "  📄  $LOG_FILE"
+    echo
+
+    if [[ $SEL_UPDATE -eq 1 ]]; then
+      echo "$(status_icon UPDATE) 📦  Update/Upgrade"
+      echo
+    fi
+
+    if [[ $SEL_TZ -eq 1 ]]; then
+      echo "$(status_icon TZ) 🕐  Timezone"
+      echo "     └─ $(timedatectl show -p Timezone --value 2>/dev/null || echo 'unknown')"
+      echo
+    fi
+
+    if [[ $SEL_PKGS -eq 1 ]]; then
+      echo "$(status_icon PKGS) 🔧  Packages installed"
+      echo "     └─ openssh-server, ufw, curl, wget, nano,"
+      echo "        net-tools, lm-sensors, tlp, smartmontools"
+      echo
+    fi
+
+    if [[ $SEL_SSH -eq 1 ]]; then
+      echo "$(status_icon SSH) 🔐  SSH"
+      echo "     ├─ PermitRootLogin: $(grep -m1 '^PermitRootLogin' /etc/ssh/sshd_config 2>/dev/null || echo '-')"
+      echo "     ├─ PasswordAuth:    $(grep -m1 '^PasswordAuthentication' /etc/ssh/sshd_config 2>/dev/null || echo '-')"
+      echo "     ├─ PubkeyAuth:      $(grep -m1 '^PubkeyAuthentication' /etc/ssh/sshd_config 2>/dev/null || echo '-')"
+      echo "     ├─ Service:         $(systemctl is-active ssh 2>/dev/null || echo '-')"
+      echo "     └─ Port:            $(ss -lntp 2>/dev/null | grep -oP ':\K22(?=\s)' | head -1 || echo '22')"
+      echo
+    fi
+
+    if [[ $SEL_UFW -eq 1 ]]; then
+      echo "$(status_icon UFW) 🛡️   UFW Firewall"
+      echo "     ├─ $(ufw status 2>/dev/null | head -1 || echo '-')"
+      echo "     ├─ Default in:  deny"
+      echo "     ├─ Default out: allow"
+      echo "     └─ Allowed:     OpenSSH, 22/tcp"
+      echo
+    fi
+
+    if [[ $SEL_SLEEP -eq 1 ]]; then
+      echo "$(status_icon SLEEP) 😴  Sleep/Suspend → all masked"
+      echo
+    fi
+
+    if [[ $SEL_LID -eq 1 ]]; then
+      echo "$(status_icon LID) 💻  Lid Close → ignore"
+      echo
+    fi
+
+    if [[ $SEL_TLP -eq 1 ]]; then
+      echo "$(status_icon TLP) ⚡  TLP → $(systemctl is-active tlp 2>/dev/null || echo '-')"
+      echo
+    fi
+
+    if [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]]; then
+      echo "$(status_icon WAIT) 🚀  Wait-Online → masked"
+      echo
+    fi
+
+    if [[ $USB_ENABLE -eq 1 ]]; then
+      echo "$(status_icon USB) 🔌  USB Ethernet"
+      echo "     ├─ Interface:  ${USB_IFACE:-auto-detected}"
+      echo "     ├─ MAC:        ${USB_MAC:-unknown}"
+      echo "     ├─ Renamed to: $USB_NAME"
+      echo "     ├─ USB metric: $USB_METRIC"
+      echo "     ├─ WiFi glob:  $WIFI_GLOB"
+      echo "     ├─ WiFi metric:$WIFI_METRIC"
+      echo "     └─ Cloud-init: disabled=$USB_DISABLE_CLOUDINIT"
+      echo
+    fi
+
+    echo "─────────────────────────────────"
+    echo "🌐  Network Info"
+    echo "─────────────────────────────────"
+    ip -br a 2>/dev/null || true
+    echo
+    ip route 2>/dev/null | head -5 || true
+    echo
+    echo "💡  Tip: Reboot recommended if USB rename was applied."
+  }
 }
 
 # ---------------- TUI screens ----------------
 main_menu() {
-  dialog --backtitle "$BACKTITLE" --title "Main Menu" --menu "Choose an action" 16 70 8 \
-    1 "Configure - choose tasks" \
-    2 "USB Ethernet - configure" \
-    3 "Show plan" \
-    4 "Apply" \
-    5 "Exit" \
+  BACKTITLE="$(build_backtitle)"
+  local dry_label="OFF"
+  [[ "$DRY_RUN" -eq 1 ]] && dry_label="ON"
+  dialog --backtitle "$BACKTITLE" --title "  ⚙️  Main Menu  " --menu \
+    "\n  Welcome! Select an action below:\n" 20 72 9 \
+    1 "🔧  Configure — choose tasks" \
+    2 "🔌  USB Ethernet — configure" \
+    3 "📋  Show plan" \
+    4 "🚀  Apply selected tasks" \
+    5 "🧪  Dry-run mode  [${dry_label}]" \
+    6 "📄  Tail log" \
+    7 "🚪  Exit" \
     3>&1 1>&2 2>&3
 }
 
 configure_menu() {
   local out
   out="$(
-    dialog --backtitle "$BACKTITLE" --title "Configure tasks" --checklist "Select tasks to apply" 20 78 10 \
-      UPDATE "Update/Upgrade packages" $([[ $SEL_UPDATE -eq 1 ]] && echo on || echo off) \
-      TZ "Set timezone Asia/Bangkok" $([[ $SEL_TZ -eq 1 ]] && echo on || echo off) \
-      PKGS "Install base packages" $([[ $SEL_PKGS -eq 1 ]] && echo on || echo off) \
-      SSH "Configure SSH" $([[ $SEL_SSH -eq 1 ]] && echo on || echo off) \
-      UFW "Configure UFW firewall" $([[ $SEL_UFW -eq 1 ]] && echo on || echo off) \
-      SLEEP "Disable sleep/suspend/hibernate" $([[ $SEL_SLEEP -eq 1 ]] && echo on || echo off) \
-      LID "Ignore lid close" $([[ $SEL_LID -eq 1 ]] && echo on || echo off) \
-      TLP "Enable TLP + sensors" $([[ $SEL_TLP -eq 1 ]] && echo on || echo off) \
-      WAIT "Disable systemd-networkd-wait-online" $([[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && echo on || echo off) \
+    dialog --backtitle "$BACKTITLE" --title "  🔧  Configure Tasks  " --checklist \
+      "\n  Use SPACE to toggle, ENTER to confirm:\n" 22 80 10 \
+      UPDATE "📦  Update/Upgrade packages" $([[ $SEL_UPDATE -eq 1 ]] && echo on || echo off) \
+      TZ "🕐  Set timezone Asia/Bangkok" $([[ $SEL_TZ -eq 1 ]] && echo on || echo off) \
+      PKGS "🔧  Install base packages" $([[ $SEL_PKGS -eq 1 ]] && echo on || echo off) \
+      SSH "🔐  Configure SSH (harden)" $([[ $SEL_SSH -eq 1 ]] && echo on || echo off) \
+      UFW "🛡️   Configure UFW firewall" $([[ $SEL_UFW -eq 1 ]] && echo on || echo off) \
+      SLEEP "😴  Disable sleep/suspend/hibernate" $([[ $SEL_SLEEP -eq 1 ]] && echo on || echo off) \
+      LID "💻  Ignore lid close" $([[ $SEL_LID -eq 1 ]] && echo on || echo off) \
+      TLP "⚡  Enable TLP + sensors" $([[ $SEL_TLP -eq 1 ]] && echo on || echo off) \
+      WAIT "🚀  Disable networkd wait-online" $([[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && echo on || echo off) \
       3>&1 1>&2 2>&3
   )" || return 0
 
@@ -486,15 +710,18 @@ configure_menu() {
 }
 
 usb_menu() {
+  local usb_st="OFF"
+  [[ $USB_ENABLE -eq 1 ]] && usb_st="ON"
   local choice
   choice="$(
-    dialog --backtitle "$BACKTITLE" --title "USB Ethernet" --menu "Configure USB Ethernet options" 18 78 8 \
-      1 "Toggle USB Ethernet setup (enable/disable)" \
-      2 "Set interface (auto or manual)" \
-      3 "Set rename target" \
-      4 "Set metrics (usb and wifi)" \
-      5 "Toggle disable cloud-init network" \
-      6 "Back" \
+    dialog --backtitle "$BACKTITLE" --title "  🔌  USB Ethernet [${usb_st}]  " --menu \
+      "\n  Configure USB Ethernet options:\n" 20 78 8 \
+      1 "⏻   Toggle enable/disable  [${usb_st}]" \
+      2 "🔍  Set interface (${USB_IFACE:-auto})" \
+      3 "✏️   Set rename target (${USB_NAME})" \
+      4 "📊  Set metrics (USB:${USB_METRIC} WiFi:${WIFI_METRIC})" \
+      5 "☁️   Toggle cloud-init disable ($([[ $USB_DISABLE_CLOUDINIT -eq 1 ]] && echo ON || echo OFF))" \
+      6 "↩️   Back" \
       3>&1 1>&2 2>&3
   )" || return 0
 
@@ -505,7 +732,7 @@ usb_menu() {
     2)
       local mode
       mode="$(
-        dialog --backtitle "$BACKTITLE" --title "Interface mode" --menu "Pick selection mode" 14 70 3 \
+        dialog --backtitle "$BACKTITLE" --title "  🔍  Interface Mode  " --menu "\nPick selection mode:" 14 70 3 \
           AUTO "Auto detect USB NIC" \
           MANUAL "Specify interface name" \
           BACK "Back" \
@@ -562,28 +789,30 @@ Disable cloud-init network: $USB_DISABLE_CLOUDINIT" 14 70
 }
 
 show_plan() {
-  dialog --backtitle "$BACKTITLE" --title "Plan" --scrolltext --msgbox "$(plan_text)" 22 78
+  dialog --backtitle "$BACKTITLE" --title "  📋  Execution Plan  " --scrolltext --msgbox "$(plan_text)" 24 80
+}
+
+tail_log() {
+  dialog --backtitle "$BACKTITLE" --title "  📄  Log: $LOG_FILE  " --tailbox "$LOG_FILE" 22 90 || true
 }
 
 apply_all() {
   local txt
   txt="$(plan_text)"
-  if ! dialog --backtitle "$BACKTITLE" --title "Confirm Apply" --yesno "Apply these changes?\n\n$txt" 22 78; then
+  local mode_tag=""
+  [[ "$DRY_RUN" -eq 1 ]] && mode_tag="\n\n🧪  DRY-RUN MODE — no changes will be made"
+  if ! dialog --backtitle "$BACKTITLE" --title "  ⚠️  Confirm Apply  " --yesno "Apply these changes?${mode_tag}\n\n$txt" 26 80; then
     return 0
   fi
 
-  start_live_log_window
+  run_all_tasks
 
-  # Run tasks with progress gauge
-  run_with_gauge | dialog --backtitle "$BACKTITLE" --title "Applying" --gauge "Working... (log window is updating)" 10 78 0
-
-  stop_live_log_window
-
-  dialog --backtitle "$BACKTITLE" --title "Done" --msgbox \
-"Completed.
-Log: $LOG_FILE
-
-Tip: reboot recommended if USB rename was applied." 12 78
+  # Show detailed summary
+  local summary
+  summary="$(build_summary)"
+  local sum_title="  📊  Setup Summary  "
+  [[ "$DRY_RUN" -eq 1 ]] && sum_title="  🧪  Dry-Run Summary  "
+  dialog --backtitle "$BACKTITLE" --title "$sum_title" --scrolltext --msgbox "$summary" 28 82
 }
 
 # ---------------- Loop ----------------
@@ -601,6 +830,10 @@ while true; do
       ;;
     3) show_plan ;;
     4) apply_all ;;
-    5) dialog --clear; exit 0 ;;
+    5)
+      if [[ "$DRY_RUN" -eq 1 ]]; then DRY_RUN=0; else DRY_RUN=1; fi
+      ;;
+    6) tail_log ;;
+    7) dialog --clear; exit 0 ;;
   esac
 done
