@@ -26,6 +26,34 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+# ---------------- Pre-flight Checks ----------------
+preflight_checks() {
+  echo "[INFO] Running pre-flight checks..."
+  
+  # 1. OS Check
+  if ! grep -qiE 'ubuntu|debian' /etc/os-release 2>/dev/null; then
+    echo "[WARNING] This script is optimized for Ubuntu/Debian."
+    echo "          Your OS might not be fully supported."
+    read -rp "Press Enter to continue anyway, or Ctrl+C to abort..."
+  fi
+
+  # 2. Internet Check
+  if ! ping -c 1 1.1.1.1 >/dev/null 2>&1 && ! ping -c 1 8.8.8.8 >/dev/null 2>&1; then
+    echo "[ERROR] No internet connection detected."
+    exit 1
+  fi
+
+  # 3. APT Lock Check
+  if command -v fuser >/dev/null 2>&1; then
+    if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
+      echo "[ERROR] Another apt/dpkg process is currently running (apt lock)."
+      echo "[ERROR] Please wait for it to finish, then run this script again."
+      exit 1
+    fi
+  fi
+}
+preflight_checks
+
 # ---------------- Ensure dialog ----------------
 ensure_dialog() {
   if command -v dialog >/dev/null 2>&1; then
@@ -125,6 +153,9 @@ SEL_LID=0
 SEL_TLP=0
 SEL_DISABLE_WAIT_ONLINE=0
 SEL_TAILSCALE=0
+SEL_DOCKER=0
+SEL_FAIL2BAN=0
+SEL_AUTO_UPDATE=0
 
 USB_ENABLE=0
 USB_IFACE=""
@@ -200,26 +231,18 @@ act_ssh() {
   run systemctl enable ssh
   run systemctl start ssh
 
-  local cfg="/etc/ssh/sshd_config"
-  [[ -f "$cfg" ]] && run cp -a "$cfg" "${cfg}.bak.$(date +%F-%H%M%S)"
-
-  if ! grep -qE '^[[:space:]]*PermitRootLogin[[:space:]]+' "$cfg"; then
-    echo "PermitRootLogin no" >> "$cfg"
-  else
-    run sed -i 's/^[[:space:]]*#\{0,1\}[[:space:]]*PermitRootLogin[[:space:]].*/PermitRootLogin no/' "$cfg"
+  local dropin_dir="/etc/ssh/sshd_config.d"
+  local dropin_file="${dropin_dir}/99-tui-harden.conf"
+  
+  if [[ ! -d "$dropin_dir" ]]; then
+    run mkdir -p "$dropin_dir"
   fi
 
-  if ! grep -qE '^[[:space:]]*PasswordAuthentication[[:space:]]+' "$cfg"; then
-    echo "PasswordAuthentication yes" >> "$cfg"
-  else
-    run sed -i 's/^[[:space:]]*#\{0,1\}[[:space:]]*PasswordAuthentication[[:space:]].*/PasswordAuthentication yes/' "$cfg"
-  fi
-
-  if ! grep -qE '^[[:space:]]*PubkeyAuthentication[[:space:]]+' "$cfg"; then
-    echo "PubkeyAuthentication yes" >> "$cfg"
-  else
-    run sed -i 's/^[[:space:]]*#\{0,1\}[[:space:]]*PubkeyAuthentication[[:space:]].*/PubkeyAuthentication yes/' "$cfg"
-  fi
+  write_file "$dropin_file" \
+"PermitRootLogin no
+PasswordAuthentication yes
+PubkeyAuthentication yes
+"
 
   run sshd -t
   run systemctl restart ssh
@@ -239,26 +262,28 @@ act_disable_sleep() {
 }
 
 act_ignore_lid() {
-  local cfg="/etc/systemd/logind.conf"
-  [[ -f "$cfg" ]] && run cp -a "$cfg" "${cfg}.bak.$(date +%F-%H%M%S)" || true
+  local dropin_dir="/etc/systemd/logind.conf.d"
+  local dropin_file="${dropin_dir}/99-tui-ignore-lid.conf"
 
-  if ! grep -qE '^\[Login\]' "$cfg"; then
-    echo "[Login]" >> "$cfg"
+  if [[ ! -d "$dropin_dir" ]]; then
+    run mkdir -p "$dropin_dir"
   fi
 
-  if grep -qE '^[[:space:]]*HandleLidSwitch=' "$cfg"; then
-    run sed -i 's/^[[:space:]]*HandleLidSwitch=.*/HandleLidSwitch=ignore/' "$cfg"
-  else
-    echo "HandleLidSwitch=ignore" >> "$cfg"
-  fi
-
-  if grep -qE '^[[:space:]]*HandleLidSwitchDocked=' "$cfg"; then
-    run sed -i 's/^[[:space:]]*HandleLidSwitchDocked=.*/HandleLidSwitchDocked=ignore/' "$cfg"
-  else
-    echo "HandleLidSwitchDocked=ignore" >> "$cfg"
-  fi
+  write_file "$dropin_file" \
+"[Login]
+HandleLidSwitch=ignore
+HandleLidSwitchDocked=ignore
+"
 
   run systemctl restart systemd-logind
+}
+
+act_auto_update() {
+  run apt-get install -y unattended-upgrades update-notifier-common
+  # Enable via dpkg-reconfigure but non-interactive
+  echo 'unattended-upgrades unattended-upgrades/enable_auto_updates boolean true' | debconf-set-selections >>"$LOG_FILE" 2>&1
+  run dpkg-reconfigure -f noninteractive unattended-upgrades
+  run systemctl enable --now unattended-upgrades
 }
 
 act_tlp_sensors() {
@@ -283,6 +308,45 @@ act_tailscale() {
   fi
   run systemctl enable --now tailscaled
   log "Tailscale installed. Run 'sudo tailscale up' to authenticate."
+}
+
+act_docker() {
+  if command -v docker >/dev/null 2>&1; then
+    log "Docker is already installed"
+    return 0
+  fi
+  # Install Docker official apt repo & engine
+  run apt-get update
+  run apt-get install -y ca-certificates curl gnupg
+  run install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes >>"$LOG_FILE" 2>&1
+  run chmod a+r /etc/apt/keyrings/docker.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  run apt-get update
+  run apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+  # Add SUDO_USER to docker group so they don't need sudo for docker
+  if [[ -n "${SUDO_USER:-}" ]]; then
+    run usermod -aG docker "$SUDO_USER"
+    log "Added user $SUDO_USER to docker group"
+  fi
+  run systemctl enable --now docker
+}
+
+act_fail2ban() {
+  run apt-get install -y fail2ban
+  local jail="/etc/fail2ban/jail.local"
+  write_file "$jail" \
+"[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 1h
+"
+  run systemctl enable --now fail2ban
+  run systemctl restart fail2ban
 }
 
 # ---------------- USB Ethernet helpers ----------------
@@ -434,6 +498,9 @@ plan_text() {
     [[ $SEL_TLP -eq 1 ]] && echo "  [+] Enable TLP + sensors"
     [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && echo "  [+] Disable systemd-networkd-wait-online"
     [[ $SEL_TAILSCALE -eq 1 ]] && echo "  [+] Install Tailscale VPN"
+    [[ $SEL_DOCKER -eq 1 ]] && echo "  [+] Install Docker Engine (official)"
+    [[ $SEL_FAIL2BAN -eq 1 ]] && echo "  [+] Install & Configure Fail2Ban (SSH)"
+    [[ $SEL_AUTO_UPDATE -eq 1 ]] && echo "  [+] Enable Unattended security updates"
 
     if [[ $USB_ENABLE -eq 1 ]]; then
       echo "  [+] USB Ethernet setup"
@@ -459,9 +526,10 @@ plan_text() {
 
 # ---------------- Mixed gauge progress ----------------
 # Task list definition: tag, label, selection variable, action function
-TASK_TAGS=(UPDATE TZ PKGS SSH UFW SLEEP LID TLP WAIT TAILSCALE USB)
+TASK_TAGS=(UPDATE AUTO_UPDATE TZ PKGS SSH UFW SLEEP LID TLP WAIT TAILSCALE DOCKER FAIL2BAN USB)
 TASK_LABELS=(
   "Update/Upgrade packages"
+  "Enable auto security updates"
   "Set timezone Asia/Bangkok"
   "Install base packages"
   "Configure SSH (harden)"
@@ -471,9 +539,11 @@ TASK_LABELS=(
   "Enable TLP + sensors"
   "Disable networkd wait-online"
   "Install Tailscale VPN"
+  "Install Docker Engine"
+  "Install Fail2Ban (SSH)"
   "USB Ethernet setup"
 )
-TASK_FUNCTIONS=(act_update act_timezone act_packages act_ssh act_ufw act_disable_sleep act_ignore_lid act_tlp_sensors act_disable_wait_online act_tailscale act_usbeth)
+TASK_FUNCTIONS=(act_update act_auto_update act_timezone act_packages act_ssh act_ufw act_disable_sleep act_ignore_lid act_tlp_sensors act_disable_wait_online act_tailscale act_docker act_fail2ban act_usbeth)
 
 # Status codes for dialog --mixedgauge:
 #   0=Succeeded  1=Failed  5=Done  6=Skipped  7=In Progress  8=Pending  9=N/A
@@ -483,6 +553,7 @@ is_task_selected() {
   local tag="$1"
   case "$tag" in
     UPDATE) [[ $SEL_UPDATE -eq 1 ]] ;;
+    AUTO_UPDATE) [[ $SEL_AUTO_UPDATE -eq 1 ]] ;;
     TZ) [[ $SEL_TZ -eq 1 ]] ;;
     PKGS) [[ $SEL_PKGS -eq 1 ]] ;;
     SSH) [[ $SEL_SSH -eq 1 ]] ;;
@@ -492,6 +563,8 @@ is_task_selected() {
     TLP) [[ $SEL_TLP -eq 1 ]] ;;
     WAIT) [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] ;;
     TAILSCALE) [[ $SEL_TAILSCALE -eq 1 ]] ;;
+    DOCKER) [[ $SEL_DOCKER -eq 1 ]] ;;
+    FAIL2BAN) [[ $SEL_FAIL2BAN -eq 1 ]] ;;
     USB) [[ $USB_ENABLE -eq 1 ]] ;;
     *) return 1 ;;
   esac
@@ -594,6 +667,12 @@ build_summary() {
       echo
     fi
 
+    if [[ $SEL_AUTO_UPDATE -eq 1 ]]; then
+      echo "$(si AUTO_UPDATE) Auto Security Updates"
+      echo "    +-- service: $(systemctl is-active unattended-upgrades 2>/dev/null || echo '-')"
+      echo
+    fi
+
     if [[ $SEL_TZ -eq 1 ]]; then
       echo "$(si TZ) Timezone"
       echo "    +-- $(timedatectl show -p Timezone --value 2>/dev/null || echo 'unknown')"
@@ -653,6 +732,21 @@ build_summary() {
       echo
     fi
 
+    if [[ $SEL_DOCKER -eq 1 ]]; then
+      echo "$(si DOCKER) Docker Engine"
+      echo "    +-- version: $(docker --version 2>/dev/null || echo '-')"
+      echo "    +-- compose: $(docker compose version 2>/dev/null || echo '-')"
+      echo "    +-- service: $(systemctl is-active docker 2>/dev/null || echo '-')"
+      echo
+    fi
+
+    if [[ $SEL_FAIL2BAN -eq 1 ]]; then
+      echo "$(si FAIL2BAN) Fail2Ban"
+      echo "    +-- service: $(systemctl is-active fail2ban 2>/dev/null || echo '-')"
+      echo "    +-- sshd jail: $(fail2ban-client status sshd 2>/dev/null | grep -o '[0-9]\+.*' | tr '\n' ' ' || echo '-')"
+      echo
+    fi
+
     if [[ $USB_ENABLE -eq 1 ]]; then
       echo "$(si USB) USB Ethernet"
       echo "    |-- Interface:  ${USB_IFACE:-auto-detected}"
@@ -681,8 +775,22 @@ main_menu() {
   BACKTITLE="$(build_backtitle)"
   local dry_label="OFF"
   [[ "$DRY_RUN" -eq 1 ]] && dry_label="ON"
+
+  # Gather system info for the banner
+  local os_name kernel cpu ram
+  os_name="$(grep -m1 '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' || echo 'Unknown OS')"
+  kernel="$(uname -r 2>/dev/null || echo 'Unknown')"
+  cpu="$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs || echo 'Unknown CPU')"
+  ram="$(free -h 2>/dev/null | awk '/^Mem:/ {print $2}' || echo 'Unknown RAM')"
+  
+  local sys_info="System Info:
+  OS:     $os_name
+  Kernel: $kernel
+  CPU:    $cpu
+  RAM:    $ram"
+
   dialog --backtitle "$BACKTITLE" --title " Main Menu " --menu \
-    "\nSelect an action:\n" 20 72 9 \
+    "\n${sys_info}\n\nSelect an action:\n" 22 72 9 \
     1 "Configure -- choose tasks" \
     2 "USB Ethernet -- configure" \
     3 "Show plan" \
@@ -697,12 +805,15 @@ configure_menu() {
   local out
   out="$(
     dialog --backtitle "$BACKTITLE" --title " Configure Tasks " --checklist \
-      "\nUse SPACE to toggle, ENTER to confirm:\n" 24 78 11 \
+      "\nUse SPACE to toggle, ENTER to confirm:\n" 24 78 14 \
       UPDATE "Update/Upgrade packages" $([[ $SEL_UPDATE -eq 1 ]] && echo on || echo off) \
+      AUTO_UPDATE "Enable auto security updates" $([[ $SEL_AUTO_UPDATE -eq 1 ]] && echo on || echo off) \
       TZ "Set timezone Asia/Bangkok" $([[ $SEL_TZ -eq 1 ]] && echo on || echo off) \
       PKGS "Install base packages" $([[ $SEL_PKGS -eq 1 ]] && echo on || echo off) \
       SSH "Configure SSH (harden)" $([[ $SEL_SSH -eq 1 ]] && echo on || echo off) \
+      FAIL2BAN "Install Fail2Ban (SSH protect)" $([[ $SEL_FAIL2BAN -eq 1 ]] && echo on || echo off) \
       UFW "Configure UFW firewall" $([[ $SEL_UFW -eq 1 ]] && echo on || echo off) \
+      DOCKER "Install Docker Engine + Compose" $([[ $SEL_DOCKER -eq 1 ]] && echo on || echo off) \
       SLEEP "Disable sleep/suspend/hibernate" $([[ $SEL_SLEEP -eq 1 ]] && echo on || echo off) \
       LID "Ignore lid close" $([[ $SEL_LID -eq 1 ]] && echo on || echo off) \
       TLP "Enable TLP + sensors" $([[ $SEL_TLP -eq 1 ]] && echo on || echo off) \
@@ -711,12 +822,13 @@ configure_menu() {
       3>&1 1>&2 2>&3
   )" || return 0
 
-  SEL_UPDATE=0; SEL_TZ=0; SEL_PKGS=0; SEL_SSH=0; SEL_UFW=0; SEL_SLEEP=0; SEL_LID=0; SEL_TLP=0; SEL_DISABLE_WAIT_ONLINE=0; SEL_TAILSCALE=0
+  SEL_UPDATE=0; SEL_AUTO_UPDATE=0; SEL_TZ=0; SEL_PKGS=0; SEL_SSH=0; SEL_UFW=0; SEL_SLEEP=0; SEL_LID=0; SEL_TLP=0; SEL_DISABLE_WAIT_ONLINE=0; SEL_TAILSCALE=0; SEL_DOCKER=0; SEL_FAIL2BAN=0
 
   for c in $out; do
     c="${c//\"/}"
     case "$c" in
       UPDATE) SEL_UPDATE=1 ;;
+      AUTO_UPDATE) SEL_AUTO_UPDATE=1 ;;
       TZ) SEL_TZ=1 ;;
       PKGS) SEL_PKGS=1 ;;
       SSH) SEL_SSH=1 ;;
@@ -726,6 +838,8 @@ configure_menu() {
       TLP) SEL_TLP=1 ;;
       WAIT) SEL_DISABLE_WAIT_ONLINE=1 ;;
       TAILSCALE) SEL_TAILSCALE=1 ;;
+      DOCKER) SEL_DOCKER=1 ;;
+      FAIL2BAN) SEL_FAIL2BAN=1 ;;
     esac
   done
 }
