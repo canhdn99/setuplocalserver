@@ -98,8 +98,8 @@ build_backtitle() {
   ip_addr="$(hostname -I 2>/dev/null | awk '{print $1}' || echo '?')"
   up_time="$(uptime -p 2>/dev/null || echo '?')"
   local dry_tag=""
-  [[ "${DRY_RUN:-0}" -eq 1 ]] && dry_tag="  ⚠️ DRY-RUN"
-  echo "╔═ Server Setup TUI ═╗  ║ Host: ${host}  IP: ${ip_addr}  ${up_time}${dry_tag} ║"
+  [[ "${DRY_RUN:-0}" -eq 1 ]] && dry_tag="  [DRY-RUN]"
+  echo "Server Setup TUI | Host: ${host} | IP: ${ip_addr} | ${up_time}${dry_tag}"
 }
 BACKTITLE="$(build_backtitle)"
 
@@ -408,42 +408,42 @@ RouteMetric=${WIFI_METRIC}
 # ---------------- Plan ----------------
 plan_text() {
   {
-    echo "╔══════════════════════════════════════╗"
-    echo "║        📋  Execution Plan            ║"
-    echo "╚══════════════════════════════════════╝"
+    echo "========================================"
+    echo "          Execution Plan"
+    echo "========================================"
     echo
     echo "Log: $LOG_FILE"
     echo
     echo "Selected tasks:"
-    [[ $SEL_UPDATE -eq 1 ]] && echo "  📦  Update/Upgrade packages"
-    [[ $SEL_TZ -eq 1 ]] && echo "  🕐  Set timezone Asia/Bangkok"
-    [[ $SEL_PKGS -eq 1 ]] && echo "  🔧  Install base packages"
-    [[ $SEL_SSH -eq 1 ]] && echo "  🔐  Configure SSH (harden)"
-    [[ $SEL_UFW -eq 1 ]] && echo "  🛡️   Configure UFW firewall"
-    [[ $SEL_SLEEP -eq 1 ]] && echo "  😴  Disable sleep/suspend/hibernate"
-    [[ $SEL_LID -eq 1 ]] && echo "  💻  Ignore lid close"
-    [[ $SEL_TLP -eq 1 ]] && echo "  ⚡  Enable TLP + sensors"
-    [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && echo "  🚀  Disable systemd-networkd-wait-online"
+    [[ $SEL_UPDATE -eq 1 ]] && echo "  [+] Update/Upgrade packages"
+    [[ $SEL_TZ -eq 1 ]] && echo "  [+] Set timezone Asia/Bangkok"
+    [[ $SEL_PKGS -eq 1 ]] && echo "  [+] Install base packages"
+    [[ $SEL_SSH -eq 1 ]] && echo "  [+] Configure SSH (harden)"
+    [[ $SEL_UFW -eq 1 ]] && echo "  [+] Configure UFW firewall"
+    [[ $SEL_SLEEP -eq 1 ]] && echo "  [+] Disable sleep/suspend/hibernate"
+    [[ $SEL_LID -eq 1 ]] && echo "  [+] Ignore lid close"
+    [[ $SEL_TLP -eq 1 ]] && echo "  [+] Enable TLP + sensors"
+    [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && echo "  [+] Disable systemd-networkd-wait-online"
 
     if [[ $USB_ENABLE -eq 1 ]]; then
-      echo "  🔌  USB Ethernet setup"
-      echo "       ├─ iface: ${USB_IFACE:-auto}"
-      echo "       ├─ rename: $USB_NAME"
-      echo "       ├─ usb metric: $USB_METRIC"
-      echo "       ├─ wifi glob: $WIFI_GLOB"
-      echo "       ├─ wifi metric: $WIFI_METRIC"
-      echo "       └─ disable cloud-init: $USB_DISABLE_CLOUDINIT"
+      echo "  [+] USB Ethernet setup"
+      echo "      |-- iface: ${USB_IFACE:-auto}"
+      echo "      |-- rename: $USB_NAME"
+      echo "      |-- usb metric: $USB_METRIC"
+      echo "      |-- wifi glob: $WIFI_GLOB"
+      echo "      |-- wifi metric: $WIFI_METRIC"
+      echo "      +-- disable cloud-init: $USB_DISABLE_CLOUDINIT"
     fi
 
     local cnt
     cnt="$(count_selected)"
     echo
-    echo "─────────────────────────────────"
+    echo "----------------------------------------"
     echo "Total: ${cnt} task(s) selected"
     echo
-    echo "⚠️  Notes:"
-    echo "  • USB rename usually needs reboot."
-    echo "  • Disabling wait-online speeds boot but may affect some services."
+    echo "Notes:"
+    echo "  * USB rename usually needs reboot."
+    echo "  * Disabling wait-online speeds boot but may affect some services."
   } | sed 's/\t/  /g'
 }
 
@@ -451,16 +451,16 @@ plan_text() {
 # Task list definition: tag, label, selection variable, action function
 TASK_TAGS=(UPDATE TZ PKGS SSH UFW SLEEP LID TLP WAIT USB)
 TASK_LABELS=(
-  "📦 Update/Upgrade packages"
-  "🕐 Set timezone Asia/Bangkok"
-  "🔧 Install base packages"
-  "🔐 Configure SSH (harden)"
-  "🛡️  Configure UFW firewall"
-  "😴 Disable sleep/suspend/hibernate"
-  "💻 Ignore lid close"
-  "⚡ Enable TLP + sensors"
-  "🚀 Disable networkd wait-online"
-  "🔌 USB Ethernet setup"
+  "Update/Upgrade packages"
+  "Set timezone Asia/Bangkok"
+  "Install base packages"
+  "Configure SSH (harden)"
+  "Configure UFW firewall"
+  "Disable sleep/suspend/hibernate"
+  "Ignore lid close"
+  "Enable TLP + sensors"
+  "Disable networkd wait-online"
+  "USB Ethernet setup"
 )
 TASK_FUNCTIONS=(act_update act_timezone act_packages act_ssh act_ufw act_disable_sleep act_ignore_lid act_tlp_sensors act_disable_wait_online act_usbeth)
 
@@ -503,7 +503,7 @@ show_mixed_gauge() {
     local st="${TASK_STATUS[$tag]:-9}"
     args+=("$label" "$st")
   done
-  dialog --backtitle "$BACKTITLE" --title "  🚀  Applying  " \
+  dialog --backtitle "$BACKTITLE" --title " Applying " \
     --mixedgauge "$msg" 22 78 "$pct" "${args[@]}" 2>/dev/null || true
 }
 
@@ -511,7 +511,7 @@ run_all_tasks() {
   local total
   total="$(count_selected)"
   if [[ "$total" -le 0 ]]; then
-    dialog --backtitle "$BACKTITLE" --title "  ⚠️  No Tasks  " --msgbox "No tasks selected." 8 40
+    dialog --backtitle "$BACKTITLE" --title " No Tasks " --msgbox "No tasks selected." 8 40
     return 0
   fi
 
@@ -560,100 +560,100 @@ run_all_tasks() {
 
 # ---------------- Post-apply summary ----------------
 build_summary() {
-  local status_icon
-  status_icon() {
+  local si
+  si() {
     case "${TASK_STATUS[$1]:-9}" in
-      0) echo "✅" ;;
-      1) echo "❌" ;;
-      *) echo "➖" ;;
+      0) echo "[OK]" ;;
+      1) echo "[FAIL]" ;;
+      *) echo "[--]" ;;
     esac
   }
   {
-    echo "╔══════════════════════════════════════╗"
-    echo "║       📊  Setup Summary              ║"
-    echo "╚══════════════════════════════════════╝"
+    echo "========================================"
+    echo "          Setup Summary"
+    echo "========================================"
     echo
-    echo "  🕐  $(date '+%F %T')"
-    echo "  📄  $LOG_FILE"
+    echo "  Time: $(date '+%F %T')"
+    echo "  Log:  $LOG_FILE"
     echo
 
     if [[ $SEL_UPDATE -eq 1 ]]; then
-      echo "$(status_icon UPDATE) 📦  Update/Upgrade"
+      echo "$(si UPDATE) Update/Upgrade"
       echo
     fi
 
     if [[ $SEL_TZ -eq 1 ]]; then
-      echo "$(status_icon TZ) 🕐  Timezone"
-      echo "     └─ $(timedatectl show -p Timezone --value 2>/dev/null || echo 'unknown')"
+      echo "$(si TZ) Timezone"
+      echo "    +-- $(timedatectl show -p Timezone --value 2>/dev/null || echo 'unknown')"
       echo
     fi
 
     if [[ $SEL_PKGS -eq 1 ]]; then
-      echo "$(status_icon PKGS) 🔧  Packages installed"
-      echo "     └─ openssh-server, ufw, curl, wget, nano,"
+      echo "$(si PKGS) Packages installed"
+      echo "    +-- openssh-server, ufw, curl, wget, nano,"
       echo "        net-tools, lm-sensors, tlp, smartmontools"
       echo
     fi
 
     if [[ $SEL_SSH -eq 1 ]]; then
-      echo "$(status_icon SSH) 🔐  SSH"
-      echo "     ├─ PermitRootLogin: $(grep -m1 '^PermitRootLogin' /etc/ssh/sshd_config 2>/dev/null || echo '-')"
-      echo "     ├─ PasswordAuth:    $(grep -m1 '^PasswordAuthentication' /etc/ssh/sshd_config 2>/dev/null || echo '-')"
-      echo "     ├─ PubkeyAuth:      $(grep -m1 '^PubkeyAuthentication' /etc/ssh/sshd_config 2>/dev/null || echo '-')"
-      echo "     ├─ Service:         $(systemctl is-active ssh 2>/dev/null || echo '-')"
-      echo "     └─ Port:            $(ss -lntp 2>/dev/null | grep -oP ':\K22(?=\s)' | head -1 || echo '22')"
+      echo "$(si SSH) SSH"
+      echo "    |-- PermitRootLogin: $(grep -m1 '^PermitRootLogin' /etc/ssh/sshd_config 2>/dev/null || echo '-')"
+      echo "    |-- PasswordAuth:    $(grep -m1 '^PasswordAuthentication' /etc/ssh/sshd_config 2>/dev/null || echo '-')"
+      echo "    |-- PubkeyAuth:      $(grep -m1 '^PubkeyAuthentication' /etc/ssh/sshd_config 2>/dev/null || echo '-')"
+      echo "    |-- Service:         $(systemctl is-active ssh 2>/dev/null || echo '-')"
+      echo "    +-- Port:            $(ss -lntp 2>/dev/null | grep -oP ':\K22(?=\s)' | head -1 || echo '22')"
       echo
     fi
 
     if [[ $SEL_UFW -eq 1 ]]; then
-      echo "$(status_icon UFW) 🛡️   UFW Firewall"
-      echo "     ├─ $(ufw status 2>/dev/null | head -1 || echo '-')"
-      echo "     ├─ Default in:  deny"
-      echo "     ├─ Default out: allow"
-      echo "     └─ Allowed:     OpenSSH, 22/tcp"
+      echo "$(si UFW) UFW Firewall"
+      echo "    |-- $(ufw status 2>/dev/null | head -1 || echo '-')"
+      echo "    |-- Default in:  deny"
+      echo "    |-- Default out: allow"
+      echo "    +-- Allowed:     OpenSSH, 22/tcp"
       echo
     fi
 
     if [[ $SEL_SLEEP -eq 1 ]]; then
-      echo "$(status_icon SLEEP) 😴  Sleep/Suspend → all masked"
+      echo "$(si SLEEP) Sleep/Suspend -> all masked"
       echo
     fi
 
     if [[ $SEL_LID -eq 1 ]]; then
-      echo "$(status_icon LID) 💻  Lid Close → ignore"
+      echo "$(si LID) Lid Close -> ignore"
       echo
     fi
 
     if [[ $SEL_TLP -eq 1 ]]; then
-      echo "$(status_icon TLP) ⚡  TLP → $(systemctl is-active tlp 2>/dev/null || echo '-')"
+      echo "$(si TLP) TLP -> $(systemctl is-active tlp 2>/dev/null || echo '-')"
       echo
     fi
 
     if [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]]; then
-      echo "$(status_icon WAIT) 🚀  Wait-Online → masked"
+      echo "$(si WAIT) Wait-Online -> masked"
       echo
     fi
 
     if [[ $USB_ENABLE -eq 1 ]]; then
-      echo "$(status_icon USB) 🔌  USB Ethernet"
-      echo "     ├─ Interface:  ${USB_IFACE:-auto-detected}"
-      echo "     ├─ MAC:        ${USB_MAC:-unknown}"
-      echo "     ├─ Renamed to: $USB_NAME"
-      echo "     ├─ USB metric: $USB_METRIC"
-      echo "     ├─ WiFi glob:  $WIFI_GLOB"
-      echo "     ├─ WiFi metric:$WIFI_METRIC"
-      echo "     └─ Cloud-init: disabled=$USB_DISABLE_CLOUDINIT"
+      echo "$(si USB) USB Ethernet"
+      echo "    |-- Interface:  ${USB_IFACE:-auto-detected}"
+      echo "    |-- MAC:        ${USB_MAC:-unknown}"
+      echo "    |-- Renamed to: $USB_NAME"
+      echo "    |-- USB metric: $USB_METRIC"
+      echo "    |-- WiFi glob:  $WIFI_GLOB"
+      echo "    |-- WiFi metric:$WIFI_METRIC"
+      echo "    +-- Cloud-init: disabled=$USB_DISABLE_CLOUDINIT"
       echo
     fi
 
-    echo "─────────────────────────────────"
-    echo "🌐  Network Info"
-    echo "─────────────────────────────────"
+    echo "----------------------------------------"
+    echo "Network Info"
+    echo "----------------------------------------"
     ip -br a 2>/dev/null || true
     echo
     ip route 2>/dev/null | head -5 || true
     echo
-    echo "💡  Tip: Reboot recommended if USB rename was applied."
+    echo "Tip: Reboot recommended if USB rename was applied."
   }
 }
 
@@ -662,32 +662,32 @@ main_menu() {
   BACKTITLE="$(build_backtitle)"
   local dry_label="OFF"
   [[ "$DRY_RUN" -eq 1 ]] && dry_label="ON"
-  dialog --backtitle "$BACKTITLE" --title "  ⚙️  Main Menu  " --menu \
-    "\n  Welcome! Select an action below:\n" 20 72 9 \
-    1 "🔧  Configure — choose tasks" \
-    2 "🔌  USB Ethernet — configure" \
-    3 "📋  Show plan" \
-    4 "🚀  Apply selected tasks" \
-    5 "🧪  Dry-run mode  [${dry_label}]" \
-    6 "📄  Tail log" \
-    7 "🚪  Exit" \
+  dialog --backtitle "$BACKTITLE" --title " Main Menu " --menu \
+    "\nSelect an action:\n" 20 72 9 \
+    1 "Configure -- choose tasks" \
+    2 "USB Ethernet -- configure" \
+    3 "Show plan" \
+    4 "Apply selected tasks" \
+    5 "Dry-run mode  [${dry_label}]" \
+    6 "Tail log" \
+    7 "Exit" \
     3>&1 1>&2 2>&3
 }
 
 configure_menu() {
   local out
   out="$(
-    dialog --backtitle "$BACKTITLE" --title "  🔧  Configure Tasks  " --checklist \
-      "\n  Use SPACE to toggle, ENTER to confirm:\n" 22 80 10 \
-      UPDATE "📦  Update/Upgrade packages" $([[ $SEL_UPDATE -eq 1 ]] && echo on || echo off) \
-      TZ "🕐  Set timezone Asia/Bangkok" $([[ $SEL_TZ -eq 1 ]] && echo on || echo off) \
-      PKGS "🔧  Install base packages" $([[ $SEL_PKGS -eq 1 ]] && echo on || echo off) \
-      SSH "🔐  Configure SSH (harden)" $([[ $SEL_SSH -eq 1 ]] && echo on || echo off) \
-      UFW "🛡️   Configure UFW firewall" $([[ $SEL_UFW -eq 1 ]] && echo on || echo off) \
-      SLEEP "😴  Disable sleep/suspend/hibernate" $([[ $SEL_SLEEP -eq 1 ]] && echo on || echo off) \
-      LID "💻  Ignore lid close" $([[ $SEL_LID -eq 1 ]] && echo on || echo off) \
-      TLP "⚡  Enable TLP + sensors" $([[ $SEL_TLP -eq 1 ]] && echo on || echo off) \
-      WAIT "🚀  Disable networkd wait-online" $([[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && echo on || echo off) \
+    dialog --backtitle "$BACKTITLE" --title " Configure Tasks " --checklist \
+      "\nUse SPACE to toggle, ENTER to confirm:\n" 22 78 10 \
+      UPDATE "Update/Upgrade packages" $([[ $SEL_UPDATE -eq 1 ]] && echo on || echo off) \
+      TZ "Set timezone Asia/Bangkok" $([[ $SEL_TZ -eq 1 ]] && echo on || echo off) \
+      PKGS "Install base packages" $([[ $SEL_PKGS -eq 1 ]] && echo on || echo off) \
+      SSH "Configure SSH (harden)" $([[ $SEL_SSH -eq 1 ]] && echo on || echo off) \
+      UFW "Configure UFW firewall" $([[ $SEL_UFW -eq 1 ]] && echo on || echo off) \
+      SLEEP "Disable sleep/suspend/hibernate" $([[ $SEL_SLEEP -eq 1 ]] && echo on || echo off) \
+      LID "Ignore lid close" $([[ $SEL_LID -eq 1 ]] && echo on || echo off) \
+      TLP "Enable TLP + sensors" $([[ $SEL_TLP -eq 1 ]] && echo on || echo off) \
+      WAIT "Disable networkd wait-online" $([[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && echo on || echo off) \
       3>&1 1>&2 2>&3
   )" || return 0
 
@@ -714,14 +714,14 @@ usb_menu() {
   [[ $USB_ENABLE -eq 1 ]] && usb_st="ON"
   local choice
   choice="$(
-    dialog --backtitle "$BACKTITLE" --title "  🔌  USB Ethernet [${usb_st}]  " --menu \
-      "\n  Configure USB Ethernet options:\n" 20 78 8 \
-      1 "⏻   Toggle enable/disable  [${usb_st}]" \
-      2 "🔍  Set interface (${USB_IFACE:-auto})" \
-      3 "✏️   Set rename target (${USB_NAME})" \
-      4 "📊  Set metrics (USB:${USB_METRIC} WiFi:${WIFI_METRIC})" \
-      5 "☁️   Toggle cloud-init disable ($([[ $USB_DISABLE_CLOUDINIT -eq 1 ]] && echo ON || echo OFF))" \
-      6 "↩️   Back" \
+    dialog --backtitle "$BACKTITLE" --title " USB Ethernet [${usb_st}] " --menu \
+      "\nConfigure USB Ethernet options:\n" 20 78 8 \
+      1 "Toggle enable/disable  [${usb_st}]" \
+      2 "Set interface (${USB_IFACE:-auto})" \
+      3 "Set rename target (${USB_NAME})" \
+      4 "Set metrics (USB:${USB_METRIC} WiFi:${WIFI_METRIC})" \
+      5 "Toggle cloud-init disable ($([[ $USB_DISABLE_CLOUDINIT -eq 1 ]] && echo ON || echo OFF))" \
+      6 "Back" \
       3>&1 1>&2 2>&3
   )" || return 0
 
@@ -732,7 +732,7 @@ usb_menu() {
     2)
       local mode
       mode="$(
-        dialog --backtitle "$BACKTITLE" --title "  🔍  Interface Mode  " --menu "\nPick selection mode:" 14 70 3 \
+        dialog --backtitle "$BACKTITLE" --title " Interface Mode " --menu "\nPick selection mode:" 14 70 3 \
           AUTO "Auto detect USB NIC" \
           MANUAL "Specify interface name" \
           BACK "Back" \
@@ -789,19 +789,19 @@ Disable cloud-init network: $USB_DISABLE_CLOUDINIT" 14 70
 }
 
 show_plan() {
-  dialog --backtitle "$BACKTITLE" --title "  📋  Execution Plan  " --scrolltext --msgbox "$(plan_text)" 24 80
+  dialog --backtitle "$BACKTITLE" --title " Execution Plan " --scrolltext --msgbox "$(plan_text)" 24 80
 }
 
 tail_log() {
-  dialog --backtitle "$BACKTITLE" --title "  📄  Log: $LOG_FILE  " --tailbox "$LOG_FILE" 22 90 || true
+  dialog --backtitle "$BACKTITLE" --title " Log " --tailbox "$LOG_FILE" 22 90 || true
 }
 
 apply_all() {
   local txt
   txt="$(plan_text)"
   local mode_tag=""
-  [[ "$DRY_RUN" -eq 1 ]] && mode_tag="\n\n🧪  DRY-RUN MODE — no changes will be made"
-  if ! dialog --backtitle "$BACKTITLE" --title "  ⚠️  Confirm Apply  " --yesno "Apply these changes?${mode_tag}\n\n$txt" 26 80; then
+  [[ "$DRY_RUN" -eq 1 ]] && mode_tag="\n\n[DRY-RUN] No changes will be made"
+  if ! dialog --backtitle "$BACKTITLE" --title " Confirm Apply " --yesno "Apply these changes?${mode_tag}\n\n$txt" 26 80; then
     return 0
   fi
 
@@ -810,8 +810,8 @@ apply_all() {
   # Show detailed summary
   local summary
   summary="$(build_summary)"
-  local sum_title="  📊  Setup Summary  "
-  [[ "$DRY_RUN" -eq 1 ]] && sum_title="  🧪  Dry-Run Summary  "
+  local sum_title=" Setup Summary "
+  [[ "$DRY_RUN" -eq 1 ]] && sum_title=" Dry-Run Summary "
   dialog --backtitle "$BACKTITLE" --title "$sum_title" --scrolltext --msgbox "$summary" 28 82
 }
 
