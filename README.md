@@ -25,7 +25,8 @@ Interactive TUI (Text User Interface) for automated Ubuntu/Debian server setup, 
 | 7 | Lid Close | HandleLidSwitch=ignore, HandleLidSwitchDocked=ignore |
 | 8 | TLP + Sensors | Enable TLP power management, auto-detect sensors |
 | 9 | Wait-Online | Disable systemd-networkd-wait-online for faster boot |
-| 10 | USB Ethernet | Auto-detect, rename, DHCP with route metrics, disable cloud-init network |
+| 10 | Tailscale VPN | Install Tailscale via official script, enable tailscaled |
+| 11 | USB Ethernet | Auto-detect, rename, DHCP with route metrics, disable cloud-init network |
 
 ## Quick Start
 
@@ -70,6 +71,18 @@ Toggle from the main menu (option 5). When enabled:
 - Files are logged but **not written**
 - Backups are logged but **not created**
 - Useful for testing on production servers
+
+## Tailscale VPN
+
+Installs [Tailscale](https://tailscale.com/) via the official install script. After apply:
+
+```bash
+# Authenticate and connect to your tailnet
+sudo tailscale up
+
+# Check status
+tailscale status
+```
 
 ## USB Ethernet Setup
 

@@ -115,7 +115,6 @@ on_err() {
 }
 trap on_err ERR
 
-# ---------------- State ----------------
 SEL_UPDATE=0
 SEL_TZ=0
 SEL_PKGS=0
@@ -125,6 +124,7 @@ SEL_SLEEP=0
 SEL_LID=0
 SEL_TLP=0
 SEL_DISABLE_WAIT_ONLINE=0
+SEL_TAILSCALE=0
 
 USB_ENABLE=0
 USB_IFACE=""
@@ -271,6 +271,18 @@ act_tlp_sensors() {
 act_disable_wait_online() {
   run systemctl disable --now systemd-networkd-wait-online.service || true
   run systemctl mask systemd-networkd-wait-online.service || true
+}
+
+act_tailscale() {
+  # Install Tailscale via official install script
+  if ! command -v tailscale >/dev/null 2>&1; then
+    log "Installing Tailscale..."
+    curl -fsSL https://tailscale.com/install.sh | bash >>"$LOG_FILE" 2>&1
+  else
+    log "Tailscale already installed"
+  fi
+  run systemctl enable --now tailscaled
+  log "Tailscale installed. Run 'sudo tailscale up' to authenticate."
 }
 
 # ---------------- USB Ethernet helpers ----------------
@@ -421,6 +433,7 @@ plan_text() {
     [[ $SEL_LID -eq 1 ]] && echo "  [+] Ignore lid close"
     [[ $SEL_TLP -eq 1 ]] && echo "  [+] Enable TLP + sensors"
     [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && echo "  [+] Disable systemd-networkd-wait-online"
+    [[ $SEL_TAILSCALE -eq 1 ]] && echo "  [+] Install Tailscale VPN"
 
     if [[ $USB_ENABLE -eq 1 ]]; then
       echo "  [+] USB Ethernet setup"
@@ -446,7 +459,7 @@ plan_text() {
 
 # ---------------- Mixed gauge progress ----------------
 # Task list definition: tag, label, selection variable, action function
-TASK_TAGS=(UPDATE TZ PKGS SSH UFW SLEEP LID TLP WAIT USB)
+TASK_TAGS=(UPDATE TZ PKGS SSH UFW SLEEP LID TLP WAIT TAILSCALE USB)
 TASK_LABELS=(
   "Update/Upgrade packages"
   "Set timezone Asia/Bangkok"
@@ -457,9 +470,10 @@ TASK_LABELS=(
   "Ignore lid close"
   "Enable TLP + sensors"
   "Disable networkd wait-online"
+  "Install Tailscale VPN"
   "USB Ethernet setup"
 )
-TASK_FUNCTIONS=(act_update act_timezone act_packages act_ssh act_ufw act_disable_sleep act_ignore_lid act_tlp_sensors act_disable_wait_online act_usbeth)
+TASK_FUNCTIONS=(act_update act_timezone act_packages act_ssh act_ufw act_disable_sleep act_ignore_lid act_tlp_sensors act_disable_wait_online act_tailscale act_usbeth)
 
 # Status codes for dialog --mixedgauge:
 #   0=Succeeded  1=Failed  5=Done  6=Skipped  7=In Progress  8=Pending  9=N/A
@@ -477,6 +491,7 @@ is_task_selected() {
     LID) [[ $SEL_LID -eq 1 ]] ;;
     TLP) [[ $SEL_TLP -eq 1 ]] ;;
     WAIT) [[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] ;;
+    TAILSCALE) [[ $SEL_TAILSCALE -eq 1 ]] ;;
     USB) [[ $USB_ENABLE -eq 1 ]] ;;
     *) return 1 ;;
   esac
@@ -631,6 +646,13 @@ build_summary() {
       echo
     fi
 
+    if [[ $SEL_TAILSCALE -eq 1 ]]; then
+      echo "$(si TAILSCALE) Tailscale VPN"
+      echo "    +-- tailscaled: $(systemctl is-active tailscaled 2>/dev/null || echo '-')"
+      echo "    +-- status: $(tailscale status --json 2>/dev/null | grep -o '"BackendState":"[^"]*"' | head -1 || echo 'not connected')"
+      echo
+    fi
+
     if [[ $USB_ENABLE -eq 1 ]]; then
       echo "$(si USB) USB Ethernet"
       echo "    |-- Interface:  ${USB_IFACE:-auto-detected}"
@@ -675,7 +697,7 @@ configure_menu() {
   local out
   out="$(
     dialog --backtitle "$BACKTITLE" --title " Configure Tasks " --checklist \
-      "\nUse SPACE to toggle, ENTER to confirm:\n" 22 78 10 \
+      "\nUse SPACE to toggle, ENTER to confirm:\n" 24 78 11 \
       UPDATE "Update/Upgrade packages" $([[ $SEL_UPDATE -eq 1 ]] && echo on || echo off) \
       TZ "Set timezone Asia/Bangkok" $([[ $SEL_TZ -eq 1 ]] && echo on || echo off) \
       PKGS "Install base packages" $([[ $SEL_PKGS -eq 1 ]] && echo on || echo off) \
@@ -685,10 +707,11 @@ configure_menu() {
       LID "Ignore lid close" $([[ $SEL_LID -eq 1 ]] && echo on || echo off) \
       TLP "Enable TLP + sensors" $([[ $SEL_TLP -eq 1 ]] && echo on || echo off) \
       WAIT "Disable networkd wait-online" $([[ $SEL_DISABLE_WAIT_ONLINE -eq 1 ]] && echo on || echo off) \
+      TAILSCALE "Install Tailscale VPN" $([[ $SEL_TAILSCALE -eq 1 ]] && echo on || echo off) \
       3>&1 1>&2 2>&3
   )" || return 0
 
-  SEL_UPDATE=0; SEL_TZ=0; SEL_PKGS=0; SEL_SSH=0; SEL_UFW=0; SEL_SLEEP=0; SEL_LID=0; SEL_TLP=0; SEL_DISABLE_WAIT_ONLINE=0
+  SEL_UPDATE=0; SEL_TZ=0; SEL_PKGS=0; SEL_SSH=0; SEL_UFW=0; SEL_SLEEP=0; SEL_LID=0; SEL_TLP=0; SEL_DISABLE_WAIT_ONLINE=0; SEL_TAILSCALE=0
 
   for c in $out; do
     c="${c//\"/}"
@@ -702,6 +725,7 @@ configure_menu() {
       LID) SEL_LID=1 ;;
       TLP) SEL_TLP=1 ;;
       WAIT) SEL_DISABLE_WAIT_ONLINE=1 ;;
+      TAILSCALE) SEL_TAILSCALE=1 ;;
     esac
   done
 }
