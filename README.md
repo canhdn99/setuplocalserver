@@ -20,12 +20,12 @@ Interactive TUI (Text User Interface) for automated Ubuntu/Debian server setup, 
 | 1 | Update/Upgrade | `apt-get update && upgrade && autoremove` |
 | 2 | Auto Updates | Install unattended-upgrades for automatic daily security patches |
 | 3 | Timezone | Set to `Asia/Bangkok` |
-| 4 | Base Packages | openssh-server, ufw, curl, wget, nano, net-tools, lm-sensors, tlp, smartmontools |
+| 4 | Base Packages | openssh-server, ufw, curl, wget, nano, net-tools, lm-sensors, tlp, smartmontools, git, htop, tmux, ncdu, jq, unzip, rsync, iotop |
 | 5 | SSH Hardening | PermitRootLogin=no, PasswordAuth=yes, PubkeyAuth=yes (via drop-in conf) |
-| 5 | Fail2Ban | Install and configure local jail for SSH protection |
-| 6 | UFW Firewall | Allow SSH, deny incoming, allow outgoing |
-| 7 | Docker | Install Docker Engine (official apt), Compose, add user to docker group |
-| 8 | Disable Sleep | Mask sleep/suspend/hibernate/hybrid-sleep targets |
+| 6 | Fail2Ban | Install and configure local jail for SSH protection |
+| 7 | UFW Firewall | Allow SSH, deny incoming, allow outgoing |
+| 8 | Docker | Install Docker Engine (official apt), Compose, add user to docker group |
+| 9 | Disable Sleep | Mask sleep/suspend/hibernate/hybrid-sleep targets |
 | 10 | Lid Close | HandleLidSwitch=ignore, HandleLidSwitchDocked=ignore (via drop-in conf) |
 | 11 | TLP + Sensors | Enable TLP power management, auto-detect sensors |
 | 12 | Wait-Online | Disable systemd-networkd-wait-online for faster boot |

@@ -223,7 +223,8 @@ act_packages() {
   run apt-get install -y \
     openssh-server ufw curl wget nano \
     net-tools iproute2 netcat-openbsd \
-    lm-sensors tlp
+    lm-sensors tlp git htop tmux ncdu \
+    jq unzip rsync iotop
   run apt-get install -y smartmontools || true
 }
 
@@ -682,7 +683,8 @@ build_summary() {
     if [[ $SEL_PKGS -eq 1 ]]; then
       echo "$(si PKGS) Packages installed"
       echo "    +-- openssh-server, ufw, curl, wget, nano,"
-      echo "        net-tools, lm-sensors, tlp, smartmontools"
+      echo "        net-tools, lm-sensors, tlp, smartmontools,"
+      echo "        git, htop, tmux, ncdu, jq, unzip, rsync, iotop"
       echo
     fi
 
