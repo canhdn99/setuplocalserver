@@ -16,7 +16,8 @@ LOG_FILE="$LOG_DIR/tui-setup-$(date +%F-%H%M%S).log"
 mkdir -p "$LOG_DIR"
 touch "$LOG_FILE"
 chmod 600 "$LOG_FILE"
-exec > >(tee -a "$LOG_FILE") 2>&1
+# Only redirect stdout through tee — keep stderr on terminal for dialog
+exec > >(tee -a "$LOG_FILE")
 
 # ---------------- Root check ----------------
 if [[ "${EUID}" -ne 0 ]]; then
@@ -90,7 +91,7 @@ write_file() {
 
 run() {
   echo "[INFO] Running: $*"
-  "$@"
+  "$@" 2>&1
   echo "[OK] Done: $*"
 }
 
