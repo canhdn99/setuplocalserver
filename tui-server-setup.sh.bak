@@ -378,16 +378,13 @@ act_fail2ban() {
   run apt-get install -y fail2ban
   local jail="/etc/fail2ban/jail.local"
   write_file "$jail" \
-"[DEFAULT]
-bantime = 10m
-findtime = 10m
-maxretry = 5
-
-[sshd]
+"[sshd]
 enabled = true
 port = ssh
 filter = sshd
 logpath = /var/log/auth.log
+maxretry = 3
+bantime = 1h
 "
   run systemctl enable --now fail2ban
   run systemctl restart fail2ban
